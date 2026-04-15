@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { MapContainer, Marker, Popup, Polyline, TileLayer } from 'react-leaflet';
+import { useEffect, useMemo, useState } from 'react';
+import { MapContainer, Marker, Popup, Polyline, TileLayer, useMap } from 'react-leaflet';
 
 const ORS_BASE = 'https://api.openrouteservice.org';
 const DEFAULT_PROFILE = 'foot-walking';
@@ -175,6 +175,22 @@ async function getRouteGeometry(apiKey, profile, orderedCoordinates) {
   };
 }
 
+
+
+function FitRouteBounds({ routes }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const allPoints = routes.flatMap((route) => route.routePath);
+    if (allPoints.length > 1) {
+      map.fitBounds(allPoints, { padding: [30, 30] });
+    } else if (allPoints.length === 1) {
+      map.setView(allPoints[0], 16);
+    }
+  }, [map, routes]);
+
+  return null;
+}
 function App() {
   const [apiKey, setApiKey] = useState(import.meta.env.VITE_ORS_API_KEY ?? '');
   const [origin, setOrigin] = useState('Zócalo, Ciudad de México');
@@ -347,6 +363,7 @@ function App() {
 
       <section className="map-wrapper">
         <MapContainer center={mapCenter} zoom={14} scrollWheelZoom className="map">
+          <FitRouteBounds routes={plannedRoutes} />
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
