@@ -1,0 +1,127 @@
+:root {
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: #0f172a;
+  background-color: #f8fafc;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: minmax(320px, 460px) 1fr;
+  min-height: 100vh;
+}
+
+.panel {
+  padding: 1.5rem;
+  background-color: #ffffff;
+  border-right: 1px solid #e2e8f0;
+  overflow-y: auto;
+}
+
+.panel h1 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+}
+
+.panel p {
+  color: #334155;
+}
+
+label {
+  display: block;
+  margin-top: 0.8rem;
+  margin-bottom: 0.2rem;
+  font-weight: 600;
+}
+
+input,
+textarea,
+button {
+  width: 100%;
+  border-radius: 0.6rem;
+  border: 1px solid #cbd5e1;
+  padding: 0.7rem 0.8rem;
+  font-size: 0.95rem;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.grid-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.8rem;
+}
+
+button {
+  margin-top: 1rem;
+  background-color: #2563eb;
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+button:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.error {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.route-card {
+  margin-top: 0.7rem;
+  padding: 0.6rem 0.8rem;
+  border-left: 5px solid #2563eb;
+  background-color: #f8fafc;
+  border-radius: 0.5rem;
+}
+
+.route-card h3 {
+  margin: 0;
+}
+
+.route-card p {
+  margin-bottom: 0;
+}
+
+.summary {
+  margin-top: 1rem;
+  padding: 0.8rem;
+  background-color: #eff6ff;
+  border-radius: 0.6rem;
+}
+
+.map-wrapper {
+  min-height: 100vh;
+}
+
+.map {
+  width: 100%;
+  height: 100vh;
+}
+
+@media (max-width: 920px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+
+  .grid-options {
+    grid-template-columns: 1fr;
+  }
+
+  .map {
+    height: 60vh;
+  }
+}
