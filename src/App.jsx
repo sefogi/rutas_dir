@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
-import { MapContainer, Marker, Popup, Polyline, TileLayer } from 'react-leaflet';
+import { useEffect, useMemo, useState } from 'react';
+import { MapContainer, Marker, Popup, Polyline, TileLayer, useMap } from 'react-leaflet';
 
 const ORS_BASE = 'https://api.openrouteservice.org';
+const DEFAULT_PROFILE = 'foot-walking';
 const ROUTE_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#9333ea', '#ea580c', '#0891b2'];
 
 const normalizeDestinations = (text) =>
@@ -119,8 +120,8 @@ async function geocodeAddress(apiKey, address) {
   };
 }
 
-async function getDurationMatrix(apiKey, coordinates) {
-  const response = await fetch(`${ORS_BASE}/v2/matrix/driving-car`, {
+async function getDurationMatrix(apiKey, profile, coordinates) {
+  const response = await fetch(`${ORS_BASE}/v2/matrix/${profile}`, {
     method: 'POST',
     headers: {
       Authorization: apiKey,
@@ -144,20 +145,21 @@ async function getDurationMatrix(apiKey, coordinates) {
   return data.durations;
 }
 
-async function getRouteGeometry(apiKey, orderedCoordinates) {
-  const response = await fetch(`${ORS_BASE}/v2/directions/driving-car/geojson`, {
+async function getRouteGeometry(apiKey, profile, orderedCoordinates) {
+  const response = await fetch(`${ORS_BASE}/v2/directions/${profile}/geojson`, {
     method: 'POST',
     headers: {
       Authorization: apiKey,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      coordinates: orderedCoordinates
+      coordinates: orderedCoordinates,
+      preference: 'shortest'
     })
   });
 
   if (!response.ok) {
-    throw new Error(`No se pudo calcular la ruta. Código: ${response.status}`);
+    throw new Error(`No se pudo calcular la ruta peatonal. Código: ${response.status}`);
   }
 
   const data = await response.json();
@@ -173,14 +175,30 @@ async function getRouteGeometry(apiKey, orderedCoordinates) {
   };
 }
 
+
+
+function FitRouteBounds({ routes }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const allPoints = routes.flatMap((route) => route.routePath);
+    if (allPoints.length > 1) {
+      map.fitBounds(allPoints, { padding: [30, 30] });
+    } else if (allPoints.length === 1) {
+      map.setView(allPoints[0], 16);
+    }
+  }, [map, routes]);
+
+  return null;
+}
 function App() {
   const [apiKey, setApiKey] = useState(import.meta.env.VITE_ORS_API_KEY ?? '');
-  const [origin, setOrigin] = useState('Av. Paseo de la Reforma 222, Ciudad de México');
+  const [origin, setOrigin] = useState('Zócalo, Ciudad de México');
   const [destinationsText, setDestinationsText] = useState(
-    'Parque España, Ciudad de México\nAeropuerto Internacional Benito Juárez, Ciudad de México\nBasílica de Guadalupe, Ciudad de México\nMuseo Frida Kahlo, Ciudad de México'
+    'Palacio de Bellas Artes, Ciudad de México\nAlameda Central, Ciudad de México\nTorre Latinoamericana, Ciudad de México\nTemplo Mayor, Ciudad de México'
   );
-  const [maxStopsPerRoute, setMaxStopsPerRoute] = useState(4);
-  const [proximityMinutes, setProximityMinutes] = useState(20);
+  const [maxStopsPerRoute, setMaxStopsPerRoute] = useState(5);
+  const [proximityMinutes, setProximityMinutes] = useState(12);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [plannedRoutes, setPlannedRoutes] = useState([]);
@@ -220,7 +238,7 @@ function App() {
       const geocoded = await Promise.all(allAddresses.map((address) => geocodeAddress(apiKey, address)));
       const coordinates = geocoded.map((item) => item.coordinates);
 
-      const durations = await getDurationMatrix(apiKey, coordinates);
+      const durations = await getDurationMatrix(apiKey, DEFAULT_PROFILE, coordinates);
       const destinationIndexes = Array.from({ length: coordinates.length - 1 }, (_, i) => i + 1);
       const groups = createProximityGroups(durations, 0, destinationIndexes, parsedMaxStops, parsedProximityMinutes * 60);
 
@@ -229,7 +247,7 @@ function App() {
           const orderedIndexes = nearestNeighbor(durations, 0, group);
           const orderedStops = orderedIndexes.map((idx) => geocoded[idx]);
           const orderedCoordinates = orderedIndexes.map((idx) => coordinates[idx]);
-          const route = await getRouteGeometry(apiKey, orderedCoordinates);
+          const route = await getRouteGeometry(apiKey, DEFAULT_PROFILE, orderedCoordinates);
 
           return {
             id: routeIndex + 1,
@@ -256,9 +274,9 @@ function App() {
   return (
     <main className="app">
       <section className="panel">
-        <h1>Optimizador de entregas por cercanía</h1>
+        <h1>Rutas peatonales con atajos</h1>
         <p>
-          La app agrupa entregas cercanas entre sí y crea rutas separadas para reducir tiempos de traslado.
+          Genera rutas para una persona de a pie, agrupando puntos cercanos y priorizando trayectos cortos.
         </p>
 
         <label htmlFor="apiKey">API key (OpenRouteService)</label>
@@ -270,16 +288,16 @@ function App() {
           placeholder="Tu API key"
         />
 
-        <label htmlFor="origin">Dirección de origen</label>
+        <label htmlFor="origin">Punto de inicio</label>
         <input
           id="origin"
           type="text"
           value={origin}
           onChange={(event) => setOrigin(event.target.value)}
-          placeholder="Centro de distribución"
+          placeholder="Inicio del recorrido"
         />
 
-        <label htmlFor="destinations">Direcciones de entrega (una por línea)</label>
+        <label htmlFor="destinations">Paradas (una por línea)</label>
         <textarea
           id="destinations"
           value={destinationsText}
@@ -289,7 +307,7 @@ function App() {
 
         <div className="grid-options">
           <div>
-            <label htmlFor="maxStops">Máximo de paradas por ruta</label>
+            <label htmlFor="maxStops">Máximo paradas por ruta</label>
             <input
               id="maxStops"
               type="number"
@@ -300,7 +318,7 @@ function App() {
           </div>
 
           <div>
-            <label htmlFor="proximity">Cercanía máxima (min)</label>
+            <label htmlFor="proximity">Cercanía entre paradas (min)</label>
             <input
               id="proximity"
               type="number"
@@ -312,14 +330,14 @@ function App() {
         </div>
 
         <button onClick={planRoutes} disabled={loading}>
-          {loading ? 'Calculando...' : 'Crear rutas por cercanía'}
+          {loading ? 'Calculando...' : 'Crear rutas a pie con atajos'}
         </button>
 
         {error && <p className="error">{error}</p>}
 
         {plannedRoutes.length > 0 && (
           <>
-            <h2>Rutas sugeridas</h2>
+            <h2>Rutas peatonales sugeridas</h2>
             {plannedRoutes.map((route) => (
               <div key={route.id} className="route-card" style={{ borderLeftColor: route.color }}>
                 <h3>Ruta {route.id}</h3>
@@ -330,21 +348,22 @@ function App() {
                 </ol>
                 {route.summary && (
                   <p>
-                    {(route.summary.distance / 1000).toFixed(1)} km · {Math.round(route.summary.duration / 60)} min
+                    {(route.summary.distance / 1000).toFixed(2)} km · {Math.round(route.summary.duration / 60)} min
                   </p>
                 )}
               </div>
             ))}
 
             <p className="summary">
-              Total consolidado: <strong>{totalKm.toFixed(1)} km</strong> · <strong>{totalMinutes} min</strong>
+              Total consolidado: <strong>{totalKm.toFixed(2)} km</strong> · <strong>{totalMinutes} min</strong>
             </p>
           </>
         )}
       </section>
 
       <section className="map-wrapper">
-        <MapContainer center={mapCenter} zoom={11} scrollWheelZoom className="map">
+        <MapContainer center={mapCenter} zoom={14} scrollWheelZoom className="map">
+          <FitRouteBounds routes={plannedRoutes} />
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -354,7 +373,7 @@ function App() {
             route.orderedStops.map((stop, index) => (
               <Marker key={`${stop.address}-${route.id}-${index}`} position={toLatLng(stop.coordinates)}>
                 <Popup>
-                  Ruta {route.id} · {index === 0 ? 'Origen' : `Entrega ${index}`}: {stop.address}
+                  Ruta {route.id} · {index === 0 ? 'Inicio' : `Parada ${index}`}: {stop.address}
                 </Popup>
               </Marker>
             ))
