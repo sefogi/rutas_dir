@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { MapContainer, Marker, Popup, Polyline, TileLayer } from 'react-leaflet';
 
 const ORS_BASE = 'https://api.openrouteservice.org';
+const ROUTE_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#9333ea', '#ea580c', '#0891b2'];
 
 const normalizeDestinations = (text) =>
   text
@@ -38,6 +39,63 @@ const nearestNeighbor = (matrix, startIndex, destinationIndexes) => {
   }
 
   return order;
+};
+
+const createProximityGroups = (durations, originIndex, destinationIndexes, maxStopsPerRoute, proximitySeconds) => {
+  const unassigned = new Set(destinationIndexes);
+  const groups = [];
+
+  while (unassigned.size > 0) {
+    let seed = null;
+    let bestFromOrigin = Number.POSITIVE_INFINITY;
+
+    for (const idx of unassigned) {
+      const fromOrigin = durations[originIndex][idx];
+      if (typeof fromOrigin === 'number' && fromOrigin < bestFromOrigin) {
+        bestFromOrigin = fromOrigin;
+        seed = idx;
+      }
+    }
+
+    if (seed === null) {
+      break;
+    }
+
+    const group = [seed];
+    unassigned.delete(seed);
+
+    while (group.length < maxStopsPerRoute && unassigned.size > 0) {
+      let candidate = null;
+      let bestCandidateTime = Number.POSITIVE_INFINITY;
+
+      for (const idx of unassigned) {
+        let minToGroup = Number.POSITIVE_INFINITY;
+
+        for (const current of group) {
+          const hop = durations[current][idx];
+          if (typeof hop === 'number' && hop < minToGroup) {
+            minToGroup = hop;
+          }
+        }
+
+        if (minToGroup <= proximitySeconds && minToGroup < bestCandidateTime) {
+          bestCandidateTime = minToGroup;
+          candidate = idx;
+        }
+      }
+
+      if (candidate === null) {
+        break;
+      }
+
+      group.push(candidate);
+      unassigned.delete(candidate);
+    }
+
+    groups.push(group);
+  }
+
+  return groups;
 };
 
 async function geocodeAddress(apiKey, address) {
@@ -119,20 +177,20 @@ function App() {
   const [apiKey, setApiKey] = useState(import.meta.env.VITE_ORS_API_KEY ?? '');
   const [origin, setOrigin] = useState('Av. Paseo de la Reforma 222, Ciudad de México');
   const [destinationsText, setDestinationsText] = useState(
-    'Parque España, Ciudad de México\nAeropuerto Internacional Benito Juárez, Ciudad de México\nBasílica de Guadalupe, Ciudad de México'
+    'Parque España, Ciudad de México\nAeropuerto Internacional Benito Juárez, Ciudad de México\nBasílica de Guadalupe, Ciudad de México\nMuseo Frida Kahlo, Ciudad de México'
   );
+  const [maxStopsPerRoute, setMaxStopsPerRoute] = useState(4);
+  const [proximityMinutes, setProximityMinutes] = useState(20);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [routePath, setRoutePath] = useState([]);
-  const [orderedStops, setOrderedStops] = useState([]);
-  const [summary, setSummary] = useState(null);
+  const [plannedRoutes, setPlannedRoutes] = useState([]);
 
   const mapCenter = useMemo(() => {
-    if (orderedStops.length > 0) {
-      return toLatLng(orderedStops[0].coordinates);
+    if (plannedRoutes.length > 0 && plannedRoutes[0].orderedStops.length > 0) {
+      return toLatLng(plannedRoutes[0].orderedStops[0].coordinates);
     }
     return [19.4326, -99.1332];
-  }, [orderedStops]);
+  }, [plannedRoutes]);
 
   const planRoutes = async () => {
     setLoading(true);
@@ -148,38 +206,59 @@ function App() {
         throw new Error('Debes indicar un origen y al menos una dirección de entrega.');
       }
 
+      const parsedMaxStops = Number(maxStopsPerRoute);
+      if (!Number.isInteger(parsedMaxStops) || parsedMaxStops < 1) {
+        throw new Error('El máximo de paradas por ruta debe ser un entero mayor a 0.');
+      }
+
+      const parsedProximityMinutes = Number(proximityMinutes);
+      if (Number.isNaN(parsedProximityMinutes) || parsedProximityMinutes <= 0) {
+        throw new Error('La cercanía máxima debe ser mayor a 0 minutos.');
+      }
+
       const allAddresses = [origin, ...normalizedStops];
       const geocoded = await Promise.all(allAddresses.map((address) => geocodeAddress(apiKey, address)));
       const coordinates = geocoded.map((item) => item.coordinates);
 
       const durations = await getDurationMatrix(apiKey, coordinates);
       const destinationIndexes = Array.from({ length: coordinates.length - 1 }, (_, i) => i + 1);
-      const orderIndexes = nearestNeighbor(durations, 0, destinationIndexes);
-      const orderedCoordinates = orderIndexes.map((idx) => coordinates[idx]);
-      const orderedAddresses = orderIndexes.map((idx) => geocoded[idx]);
+      const groups = createProximityGroups(durations, 0, destinationIndexes, parsedMaxStops, parsedProximityMinutes * 60);
 
-      const route = await getRouteGeometry(apiKey, orderedCoordinates);
+      const resolvedRoutes = await Promise.all(
+        groups.map(async (group, routeIndex) => {
+          const orderedIndexes = nearestNeighbor(durations, 0, group);
+          const orderedStops = orderedIndexes.map((idx) => geocoded[idx]);
+          const orderedCoordinates = orderedIndexes.map((idx) => coordinates[idx]);
+          const route = await getRouteGeometry(apiKey, orderedCoordinates);
 
-      setOrderedStops(orderedAddresses);
-      setRoutePath(route.geometry.map(toLatLng));
-      setSummary(route.summary ?? null);
+          return {
+            id: routeIndex + 1,
+            color: ROUTE_COLORS[routeIndex % ROUTE_COLORS.length],
+            orderedStops,
+            routePath: route.geometry.map(toLatLng),
+            summary: route.summary ?? null
+          };
+        })
+      );
+
+      setPlannedRoutes(resolvedRoutes);
     } catch (err) {
       setError(err.message || 'Ocurrió un error inesperado al construir la ruta.');
-      setRoutePath([]);
-      setOrderedStops([]);
-      setSummary(null);
+      setPlannedRoutes([]);
     } finally {
       setLoading(false);
     }
   };
 
+  const totalKm = plannedRoutes.reduce((acc, route) => acc + (route.summary?.distance ?? 0), 0) / 1000;
+  const totalMinutes = Math.round(plannedRoutes.reduce((acc, route) => acc + (route.summary?.duration ?? 0), 0) / 60);
+
   return (
     <main className="app">
       <section className="panel">
-        <h1>Optimizador de entregas</h1>
+        <h1>Optimizador de entregas por cercanía</h1>
         <p>
-          Carga direcciones y obtén una secuencia sugerida para minimizar tiempo de traslado usando
-          OpenRouteService.
+          La app agrupa entregas cercanas entre sí y crea rutas separadas para reducir tiempos de traslado.
         </p>
 
         <label htmlFor="apiKey">API key (OpenRouteService)</label>
@@ -208,28 +287,59 @@ function App() {
           rows={8}
         />
 
+        <div className="grid-options">
+          <div>
+            <label htmlFor="maxStops">Máximo de paradas por ruta</label>
+            <input
+              id="maxStops"
+              type="number"
+              min="1"
+              value={maxStopsPerRoute}
+              onChange={(event) => setMaxStopsPerRoute(event.target.value)}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="proximity">Cercanía máxima (min)</label>
+            <input
+              id="proximity"
+              type="number"
+              min="1"
+              value={proximityMinutes}
+              onChange={(event) => setProximityMinutes(event.target.value)}
+            />
+          </div>
+        </div>
+
         <button onClick={planRoutes} disabled={loading}>
-          {loading ? 'Calculando...' : 'Optimizar ruta'}
+          {loading ? 'Calculando...' : 'Crear rutas por cercanía'}
         </button>
 
         {error && <p className="error">{error}</p>}
 
-        {orderedStops.length > 0 && (
+        {plannedRoutes.length > 0 && (
           <>
-            <h2>Orden sugerido de paradas</h2>
-            <ol>
-              {orderedStops.map((stop, index) => (
-                <li key={`${stop.address}-${index}`}>{stop.address}</li>
-              ))}
-            </ol>
-          </>
-        )}
+            <h2>Rutas sugeridas</h2>
+            {plannedRoutes.map((route) => (
+              <div key={route.id} className="route-card" style={{ borderLeftColor: route.color }}>
+                <h3>Ruta {route.id}</h3>
+                <ol>
+                  {route.orderedStops.map((stop, index) => (
+                    <li key={`${stop.address}-${route.id}-${index}`}>{stop.address}</li>
+                  ))}
+                </ol>
+                {route.summary && (
+                  <p>
+                    {(route.summary.distance / 1000).toFixed(1)} km · {Math.round(route.summary.duration / 60)} min
+                  </p>
+                )}
+              </div>
+            ))}
 
-        {summary && (
-          <p className="summary">
-            Distancia total estimada: <strong>{(summary.distance / 1000).toFixed(1)} km</strong> ·
-            Duración estimada: <strong>{Math.round(summary.duration / 60)} min</strong>
-          </p>
+            <p className="summary">
+              Total consolidado: <strong>{totalKm.toFixed(1)} km</strong> · <strong>{totalMinutes} min</strong>
+            </p>
+          </>
         )}
       </section>
 
@@ -240,15 +350,25 @@ function App() {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          {orderedStops.map((stop, index) => (
-            <Marker key={`${stop.address}-${index}`} position={toLatLng(stop.coordinates)}>
-              <Popup>
-                {index === 0 ? 'Origen' : `Entrega ${index}`}: {stop.address}
-              </Popup>
-            </Marker>
-          ))}
+          {plannedRoutes.map((route) =>
+            route.orderedStops.map((stop, index) => (
+              <Marker key={`${stop.address}-${route.id}-${index}`} position={toLatLng(stop.coordinates)}>
+                <Popup>
+                  Ruta {route.id} · {index === 0 ? 'Origen' : `Entrega ${index}`}: {stop.address}
+                </Popup>
+              </Marker>
+            ))
+          )}
 
-          {routePath.length > 1 && <Polyline positions={routePath} pathOptions={{ color: '#2563eb', weight: 5 }} />}
+          {plannedRoutes.map((route) =>
+            route.routePath.length > 1 ? (
+              <Polyline
+                key={`poly-${route.id}`}
+                positions={route.routePath}
+                pathOptions={{ color: route.color, weight: 5 }}
+              />
+            ) : null
+          )}
         </MapContainer>
       </section>
     </main>

@@ -1,6 +1,6 @@
 # rutas_dir
 
-Aplicación React para planificar rutas de entregas y mostrarlas en mapa, priorizando un orden de paradas más rápido.
+Aplicación React para planificar rutas de entregas y mostrarlas en mapa, agrupando direcciones cercanas para optimizar tiempo.
 
 ## Stack
 
@@ -37,14 +37,16 @@ Aplicación React para planificar rutas de entregas y mostrarlas en mapa, priori
 
 1. Geocodifica origen y entregas.
 2. Consulta una matriz de duración (segundos) entre todos los puntos.
-3. Aplica heurística **nearest neighbor** para sugerir orden de paradas.
-4. Solicita la geometría de la ruta final para dibujarla en el mapa.
+3. Agrupa paradas por cercanía (umbral en minutos configurable).
+4. Limita cuántas paradas caben en cada ruta (configurable).
+5. Ordena cada grupo con heurística **nearest neighbor**.
+6. Dibuja rutas separadas por color sobre el mapa.
 
-> Nota: nearest neighbor es rápido y práctico, pero no siempre da la solución global óptima (TSP exacto).
+> Nota: nearest neighbor y el agrupamiento por proximidad son heurísticos rápidos; no garantizan la solución global óptima.
 
 ## Próximos pasos recomendados
 
-- Soportar múltiples vehículos.
+- Soportar múltiples vehículos con capacidad.
 - Ventanas de tiempo por entrega.
-- Persistencia de rutas históricas.
+- Restricciones por prioridad de cliente.
 - Migrar cálculo sensible a un backend propio (para ocultar API key).
